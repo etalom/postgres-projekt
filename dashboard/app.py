@@ -71,7 +71,7 @@ Mein Projekt.
 # --------------------------------------------------
 
 engine = create_engine(
-    "postgresql+psycopg://admin:POSTGRES_PASSWORD@localhost:5433/meinedb"
+    "postgresql+psycopg://admin:Admi123!@localhost:5433/meinedb"
 )
 
 # Tabelle laden

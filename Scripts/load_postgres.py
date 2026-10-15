@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 import pandas as pd
 
 engine = create_engine(
-    "postgresql://admin:passwort@localhost:5433/meinedb"
+    "postgresql://admin:<passwort>@localhost:5433/meinedb"
 )
 
 df = pd.read_csv("data/winequality.csv")
