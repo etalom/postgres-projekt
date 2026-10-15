@@ -61,7 +61,7 @@ margin-bottom:20px;
 🍷 Wine Quality Dashboard
 </h1>
 <p>
-Mein Projekt. 
+Mein Projekt.
 </p>
 </div>
 """, unsafe_allow_html=True)
@@ -71,7 +71,7 @@ Mein Projekt.
 # --------------------------------------------------
 
 engine = create_engine(
-    "postgresql+psycopg://admin:Admi123!@localhost:5433/meinedb"
+    "postgresql+psycopg://admin:POSTGRES_PASSWORD@localhost:5433/meinedb"
 )
 
 # Tabelle laden
