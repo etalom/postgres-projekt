@@ -1,14 +1,18 @@
 services:
+
   postgres:
     image: postgres:17
     container_name: postgres
     restart: unless-stopped
+
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+
     ports:
       - "5433:5432"
+
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -16,15 +20,51 @@ services:
     image: dpage/pgadmin4
     container_name: pgadmin
     restart: unless-stopped
+
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+
     ports:
       - "8081:80"
+
     depends_on:
       - postgres
+
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+
+  airflow:
+    image: apache/airflow:2.10.3
+    container_name: airflow
+
+    restart: unless-stopped
+
+    ports:
+      - "8082:8080"
+
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+
+      # EMAIL
+      AIRFLOW__SMTP__SMTP_HOST: smtp.gmail.com
+      AIRFLOW__SMTP__SMTP_STARTTLS: "True"
+      AIRFLOW__SMTP__SMTP_SSL: "False"
+      AIRFLOW__SMTP__SMTP_USER: emmanueltalom224@gmail.com
+      AIRFLOW__SMTP__SMTP_PASSWORD: Emma161996
+      AIRFLOW__SMTP__SMTP_PORT: "587"
+      AIRFLOW__SMTP__SMTP_MAIL_FROM: emmanueltalom224@gmail.com
+
+    command: standalone
+
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./Data:/opt/airflow/data
+
+    depends_on:
+      - postgres
 
 volumes:
   pgdata:
