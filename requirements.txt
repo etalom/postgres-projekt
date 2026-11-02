@@ -1,0 +1,13 @@
+langchain-community
+langchain-text-splitters
+langchain-ollama
+
+pypdf
+
+ollama
+
+sqlalchemy
+psycopg2-binary
+
+pandas
+plotly

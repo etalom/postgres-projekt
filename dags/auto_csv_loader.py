@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from airflow.datasets import Dataset
 
 from datetime import datetime
 
@@ -14,10 +15,20 @@ from sqlalchemy import create_engine, text
 # ---------------------------------------------------
 
 INCOMING_FOLDER = "/opt/airflow/data/incoming"
+
 ARCHIVE_FOLDER = "/opt/airflow/data/archive"
 
 DATABASE_URL = (
-    "postgresql+psycopg2://admin:Admi123!@postgres:5432/meinedb"
+    "postgresql+psycopg2://"
+    "admin:Admi123!@postgres:5432/meinedb"
+)
+
+# ---------------------------------------------------
+# Dataset Definition
+# ---------------------------------------------------
+
+raw_dataset = Dataset(
+    "postgres://meinedb/raw_csv_loaded"
 )
 
 # ---------------------------------------------------
@@ -26,17 +37,35 @@ DATABASE_URL = (
 
 def extract_files():
 
+    print(
+        f"INCOMING_FOLDER: {INCOMING_FOLDER}"
+    )
+
+    folder_content = os.listdir(
+        INCOMING_FOLDER
+    )
+
+    print(
+        f"Ordnerinhalt: {folder_content}"
+    )
+
     files = [
-        f for f in os.listdir(INCOMING_FOLDER)
-        if f.endswith(".csv")
+        f
+        for f in folder_content
+        if f.lower().endswith(".csv")
     ]
 
-    print(f"Gefundene Dateien: {files}")
+    print(
+        f"CSV-Dateien: {files}"
+    )
 
     if not files:
-        raise ValueError(
-            f"Keine CSV-Dateien in {INCOMING_FOLDER} gefunden."
+
+        print(
+            "Keine CSV-Dateien gefunden."
         )
+
+        return []
 
     return files
 
@@ -51,7 +80,17 @@ def check_duplicates(**context):
         task_ids="extract_files"
     )
 
-    engine = create_engine(DATABASE_URL)
+    if not files:
+
+        print(
+            "Keine Dateien zum Prüfen."
+        )
+
+        return []
+
+    engine = create_engine(
+        DATABASE_URL
+    )
 
     new_files = []
 
@@ -65,21 +104,34 @@ def check_duplicates(**context):
                     FROM file_import_log
                     WHERE filename = :filename
                 """),
-                {"filename": file}
+                {
+                    "filename": file
+                }
             )
 
             count = result.scalar()
 
             if count == 0:
-                print(f"Neue Datei: {file}")
+
+                print(
+                    f"Neue Datei: {file}"
+                )
+
                 new_files.append(file)
+
             else:
-                print(f"Bereits importiert: {file}")
+
+                print(
+                    f"Bereits importiert: {file}"
+                )
 
     if not new_files:
-        raise ValueError(
-            "Keine neuen Dateien zum Import gefunden."
+
+        print(
+            "Keine neuen Dateien gefunden."
         )
+
+        return []
 
     return new_files
 
@@ -94,6 +146,14 @@ def validate_files(**context):
         task_ids="check_duplicates"
     )
 
+    if not files:
+
+        print(
+            "Keine Dateien zum Validieren."
+        )
+
+        return []
+
     valid_files = []
 
     for file in files:
@@ -105,7 +165,9 @@ def validate_files(**context):
 
         try:
 
-            df = pd.read_csv(filepath)
+            df = pd.read_csv(
+                filepath
+            )
 
             if len(df) > 0:
 
@@ -114,7 +176,9 @@ def validate_files(**context):
                     f"({len(df)} Zeilen)"
                 )
 
-                valid_files.append(file)
+                valid_files.append(
+                    file
+                )
 
         except Exception as e:
 
@@ -123,9 +187,12 @@ def validate_files(**context):
             )
 
     if not valid_files:
-        raise ValueError(
+
+        print(
             "Keine gültigen CSV-Dateien gefunden."
         )
+
+        return []
 
     return valid_files
 
@@ -140,6 +207,14 @@ def transform_files(**context):
         task_ids="validate_files"
     )
 
+    if not files:
+
+        print(
+            "Keine Dateien zum Transformieren."
+        )
+
+        return []
+
     transformed_files = []
 
     for file in files:
@@ -149,9 +224,10 @@ def transform_files(**context):
             file
         )
 
-        df = pd.read_csv(filepath)
+        df = pd.read_csv(
+            filepath
+        )
 
-        # Spalten bereinigen
         df.columns = (
             df.columns
             .str.lower()
@@ -166,7 +242,8 @@ def transform_files(**context):
         after = len(df)
 
         print(
-            f"{file}: {before - after} "
+            f"{file}: "
+            f"{before - after} "
             f"Duplikate entfernt"
         )
 
@@ -175,10 +252,11 @@ def transform_files(**context):
             index=False
         )
 
-        transformed_files.append(file)
+        transformed_files.append(
+            file
+        )
 
     return transformed_files
-
 
 # ---------------------------------------------------
 # In PostgreSQL laden
@@ -190,7 +268,17 @@ def load_to_postgres(**context):
         task_ids="transform_files"
     )
 
-    engine = create_engine(DATABASE_URL)
+    if not files:
+
+        print(
+            "Keine Dateien zum Laden."
+        )
+
+        return []
+
+    engine = create_engine(
+        DATABASE_URL
+    )
 
     for file in files:
 
@@ -206,7 +294,9 @@ def load_to_postgres(**context):
             .replace("-", "_")
         )
 
-        df = pd.read_csv(filepath)
+        df = pd.read_csv(
+            filepath
+        )
 
         df.to_sql(
             table_name,
@@ -233,7 +323,17 @@ def register_import(**context):
         task_ids="load_to_postgres"
     )
 
-    engine = create_engine(DATABASE_URL)
+    if not files:
+
+        print(
+            "Keine Dateien zum Registrieren."
+        )
+
+        return []
+
+    engine = create_engine(
+        DATABASE_URL
+    )
 
     with engine.begin() as conn:
 
@@ -246,7 +346,9 @@ def register_import(**context):
                     VALUES (:filename)
                     ON CONFLICT DO NOTHING
                 """),
-                {"filename": file}
+                {
+                    "filename": file
+                }
             )
 
             print(
@@ -254,7 +356,6 @@ def register_import(**context):
             )
 
     return files
-
 
 # ---------------------------------------------------
 # Dateien archivieren
@@ -265,6 +366,14 @@ def archive_files(**context):
     files = context["ti"].xcom_pull(
         task_ids="register_import"
     )
+
+    if not files:
+
+        print(
+            "Keine Dateien zum Archivieren."
+        )
+
+        return
 
     os.makedirs(
         ARCHIVE_FOLDER,
@@ -292,60 +401,65 @@ def archive_files(**context):
             f"{file} archiviert"
         )
 
-
 # ---------------------------------------------------
 # DAG
 # ---------------------------------------------------
-default_args = {
-    "owner": "airflow",
-    "email": ["emmanueltalom224@gmail.com"],
-    "email_on_failure": True,
-    "email_on_retry": False,
-    "retries": 1,
-}
+
 with DAG(
     dag_id="auto_csv_loader",
-    description="Automatische CSV ETL Pipeline",
-    start_date=datetime(2025, 1, 1),
-    schedule="*/5 * * * *",      # alle 5 Minuten
+    description="Automatische CSV ELT Pipeline",
+    start_date=datetime(
+        2025,
+        1,
+        1
+    ),
+    schedule="*/5 * * * *",
     catchup=False,
-    max_active_runs=1,           # nie zwei Läufe gleichzeitig
-    tags=["etl", "csv", "postgres"],
+    max_active_runs=1,
+    tags=[
+        "etl",
+        "csv",
+        "postgres",
+        "dataset"
+    ],
 ) as dag:
 
     extract_task = PythonOperator(
         task_id="extract_files",
-        python_callable=extract_files,
+        python_callable=extract_files
     )
 
     duplicate_task = PythonOperator(
         task_id="check_duplicates",
-        python_callable=check_duplicates,
+        python_callable=check_duplicates
     )
 
     validate_task = PythonOperator(
         task_id="validate_files",
-        python_callable=validate_files,
+        python_callable=validate_files
     )
 
     transform_task = PythonOperator(
         task_id="transform_files",
-        python_callable=transform_files,
+        python_callable=transform_files
     )
 
     load_task = PythonOperator(
         task_id="load_to_postgres",
         python_callable=load_to_postgres,
+
+        # Dataset Event erzeugen
+        outlets=[raw_dataset]
     )
 
     register_task = PythonOperator(
         task_id="register_import",
-        python_callable=register_import,
+        python_callable=register_import
     )
 
     archive_task = PythonOperator(
         task_id="archive_files",
-        python_callable=archive_files,
+        python_callable=archive_files
     )
 
     (

@@ -1,164 +1,291 @@
-import streamlit as st
-import pandas as pd
-from sqlalchemy import create_engine
-import plotly.express as px
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-# --------------------------------------------------
-# Seitenkonfiguration
-# --------------------------------------------------
+import ollama
 
-st.set_page_config(
-    page_title="Wine Quality Dashboard",
-    page_icon="🍷",
-    layout="wide"
+from sqlalchemy import create_engine, text
+from langchain_ollama import OllamaEmbeddings
+
+# ==================================================
+# FastAPI
+# ==================================================
+
+app = FastAPI(
+    title="Vergaberecht RAG API",
+    description="Hybrid RAG mit PostgreSQL, pgvector und Ollama",
+    version="1.0.0"
 )
 
-# --------------------------------------------------
-# Design / CSS
-# --------------------------------------------------
+# ==================================================
+# Datenbank
+# ==================================================
 
-st.markdown("""
-<style>
-
-.stApp {
-    background: linear-gradient(
-        135deg,
-        #fff5f5 0%,
-        #fde2e4 50%,
-        #f8d7da 100%
-    );
-}
-
-div[data-testid="metric-container"] {
-    background-color: white;
-    border-radius: 15px;
-    padding: 20px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    border-left: 5px solid #7b1e3f;
-}
-
-h1, h2, h3 {
-    color: #7b1e3f;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# --------------------------------------------------
-# Header
-# --------------------------------------------------
-
-st.markdown("""
-<div style="
-background: linear-gradient(90deg,#7b1e3f,#a93f55);
-padding:25px;
-border-radius:20px;
-text-align:center;
-color:white;
-margin-bottom:20px;
-">
-<h1 style="color:white;">
-🍷 Wine Quality Dashboard
-</h1>
-<p>
-Mein Projekt.
-</p>
-</div>
-""", unsafe_allow_html=True)
-
-# --------------------------------------------------
-# Datenbankverbindung
-# --------------------------------------------------
-
-engine = create_engine(
-    "postgresql+psycopg://admin:Admi123!@localhost:5433/meinedb"
+DATABASE_URL = (
+    "postgresql+psycopg2://admin:Admi123!@localhost:5433/meinedb"
 )
 
-# Tabelle laden
-df = pd.read_sql(
-    "SELECT * FROM winequalityN",
-    engine
+engine = create_engine(DATABASE_URL)
+
+# ==================================================
+# Embeddings
+# ==================================================
+
+embeddings = OllamaEmbeddings(
+    model="nomic-embed-text"
 )
 
-# --------------------------------------------------
-# KPIs
-# --------------------------------------------------
+# ==================================================
+# Request Modell
+# ==================================================
 
-col1, col2, col3 = st.columns(3)
+class ChatRequest(BaseModel):
+    question: str
+    top_k: int = 5
+    temperature: float = 0.1
+    model: str = "llama3.2"
 
-col1.metric(
-    "📊 Datensätze",
-    f"{len(df):,}"
-)
+# ==================================================
+# Root Endpoint
+# ==================================================
 
-col2.metric(
-    "🍷 Ø Alkohol",
-    round(df["alcohol"].mean(), 2)
-)
+@app.get("/")
+def root():
 
-col3.metric(
-    "⭐ Ø Qualität",
-    round(df["quality"].mean(), 2)
-)
+    return {
+        "status": "running",
+        "service": "RAG API",
+        "database": "PostgreSQL",
+        "llm": "Ollama"
+    }
 
-st.markdown("---")
+# ==================================================
+# Health Check
+# ==================================================
 
-# --------------------------------------------------
-# Diagramm Alkoholgehalt
-# --------------------------------------------------
+@app.get("/health")
+def health():
 
-st.subheader("🍷 Durchschnittlicher Alkoholgehalt")
+    try:
 
-avg_alcohol = (
-    df.groupby("type")["alcohol"]
-    .mean()
-    .reset_index()
-)
+        with engine.connect() as conn:
 
-fig1 = px.bar(
-    avg_alcohol,
-    x="type",
-    y="alcohol",
-    color="type",
-    title="Durchschnittlicher Alkoholgehalt nach Weintyp",
-    color_discrete_sequence=["#7b1e3f", "#d63384"]
-)
+            conn.execute(
+                text("SELECT 1")
+            )
 
-st.plotly_chart(fig1, use_container_width=True)
+        return {
+            "status": "healthy"
+        }
 
-# --------------------------------------------------
-# Qualitätsverteilung
-# --------------------------------------------------
+    except Exception as e:
 
-st.subheader("⭐ Qualitätsverteilung")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
-fig2 = px.histogram(
-    df,
-    x="quality",
-    nbins=10,
-    color_discrete_sequence=["#7b1e3f"]
-)
+# ==================================================
+# Chat Endpoint
+# ==================================================
 
-st.plotly_chart(fig2, use_container_width=True)
+@app.post("/chat")
+def chat(request: ChatRequest):
 
-# --------------------------------------------------
-# Datenvorschau
-# --------------------------------------------------
+    try:
 
-st.subheader("📄 Datenvorschau")
+        # ------------------------------------------
+        # User Query Embedding
+        # ------------------------------------------
 
-st.dataframe(
-    df.head(20),
-    use_container_width=True
-)
+        query_vector = embeddings.embed_query(
+            request.question
+        )
 
-# --------------------------------------------------
-# Statistische Übersicht
-# --------------------------------------------------
+        with engine.connect() as conn:
 
-st.subheader("📈 Statistische Übersicht")
+            # --------------------------------------
+            # Vector Search
+            # --------------------------------------
 
-st.dataframe(
-    df.describe(),
-    use_container_width=True
-)
+            vector_result = conn.execute(
+                text("""
+                    SELECT
+                        source_file,
+                        chunk_number,
+                        chunk_text,
+                        1 - (
+                            embedding <=>
+                            CAST(:vector AS vector)
+                        ) AS score
+                    FROM pdf_embeddings
+                    ORDER BY embedding <=>
+                             CAST(:vector AS vector)
+                    LIMIT :top_k
+                """),
+                {
+                    "vector": str(query_vector),
+                    "top_k": request.top_k
+                }
+            )
+
+            vector_rows = vector_result.fetchall()
+
+            # --------------------------------------
+            # Full Text Search
+            # --------------------------------------
+
+            keyword_result = conn.execute(
+                text("""
+                    SELECT
+                        source_file,
+                        chunk_number,
+                        chunk_text,
+                        ts_rank(
+                            search_vector,
+                            plainto_tsquery(
+                                'german',
+                                :frage
+                            )
+                        ) AS score
+                    FROM pdf_embeddings
+                    WHERE search_vector @@
+                          plainto_tsquery(
+                              'german',
+                              :frage
+                          )
+                    ORDER BY score DESC
+                    LIMIT :top_k
+                """),
+                {
+                    "frage": request.question,
+                    "top_k": request.top_k
+                }
+            )
+
+            keyword_rows = keyword_result.fetchall()
+
+        # ------------------------------------------
+        # Hybrid Ranking
+        # ------------------------------------------
+
+        docs = {}
+
+        for row in vector_rows:
+
+            key = (
+                row.source_file,
+                row.chunk_number
+            )
+
+            docs[key] = {
+                "source_file": row.source_file,
+                "chunk_number": row.chunk_number,
+                "chunk_text": row.chunk_text,
+                "score": row.score * 0.7
+            }
+
+        for row in keyword_rows:
+
+            key = (
+                row.source_file,
+                row.chunk_number
+            )
+
+            if key in docs:
+
+                docs[key]["score"] += (
+                    row.score * 0.3
+                )
+
+            else:
+
+                docs[key] = {
+                    "source_file": row.source_file,
+                    "chunk_number": row.chunk_number,
+                    "chunk_text": row.chunk_text,
+                    "score": row.score * 0.3
+                }
+
+        hybrid_docs = sorted(
+            docs.values(),
+            key=lambda x: x["score"],
+            reverse=True
+        )[:request.top_k]
+
+        # ------------------------------------------
+        # Kontext erzeugen
+        # ------------------------------------------
+
+        context = "\n\n".join(
+            doc["chunk_text"]
+            for doc in hybrid_docs
+        )
+
+        # ------------------------------------------
+        # LLM
+        # ------------------------------------------
+
+        response = ollama.chat(
+            model=request.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": """
+Du bist ein Experte für Vergaberecht.
+
+Nutze ausschließlich die bereitgestellten Dokumente.
+
+Wenn die Antwort nicht im Kontext steht,
+sage ausdrücklich:
+
+'Diese Information konnte in den
+bereitgestellten Dokumenten
+nicht gefunden werden.'
+"""
+                },
+                {
+                    "role": "user",
+                    "content": f"""
+Kontext:
+
+{context}
+
+Frage:
+
+{request.question}
+"""
+                }
+            ],
+            options={
+                "temperature": request.temperature,
+                "top_p": 0.9,
+                "repeat_penalty": 1.1,
+                "num_predict": 1500
+            }
+        )
+
+        answer = response["message"]["content"]
+
+        return {
+            "question": request.question,
+            "answer": answer,
+            "documents_found": len(hybrid_docs),
+            "sources": [
+                {
+                    "file": doc["source_file"],
+                    "chunk": doc["chunk_number"],
+                    "score": round(
+                        doc["score"],
+                        4
+                    )
+                }
+                for doc in hybrid_docs
+            ]
+        }
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )

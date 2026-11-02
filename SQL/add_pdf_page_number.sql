@@ -1,0 +1,2 @@
+ALTER TABLE pdf_embeddings
+ADD COLUMN IF NOT EXISTS page_number INTEGER;
