@@ -2,8 +2,7 @@
 .venv
 .venv-1
 __pycache__/
-
 Data/
 logs/
-
 *.pyc
+EOF
