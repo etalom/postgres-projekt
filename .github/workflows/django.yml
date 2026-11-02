@@ -15,7 +15,12 @@ jobs:
         with:
           host: ${{ secrets.HOST }}
           username: ubuntu
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          key: ${{b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACDfUiJX7YkMg1Zt4mtlcN8nHef3VfsCBq2sAwTMdVyvIwAAAJC7m+cau5vn
+GgAAAAtzc2gtZWQyNTUxOQAAACDfUiJX7YkMg1Zt4mtlcN8nHef3VfsCBq2sAwTMdVyvIw
+AAAECaVyHSpOs8Okt5w88eH/ztP1Lnfzro2XxRFnE6G2BuwN9SIlftiQyDVm3ia2Vw3ycd
+5/dV+wIGrawDBMx1XK8jAAAACGVtbWFudWVsAQIDBAU=
+}}
           script: |
             cd ~/postgres-projekt
 
